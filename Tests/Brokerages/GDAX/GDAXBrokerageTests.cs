@@ -12,6 +12,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
 */
+
 using Moq;
 using Newtonsoft.Json;
 using NUnit.Framework;
@@ -19,7 +20,6 @@ using QuantConnect.Brokerages;
 using QuantConnect.Brokerages.GDAX;
 using QuantConnect.Interfaces;
 using QuantConnect.Orders;
-using QuantConnect.Packets;
 using RestSharp;
 using System;
 using System.Collections.Generic;
@@ -30,11 +30,9 @@ using System.Threading;
 
 namespace QuantConnect.Tests.Brokerages.GDAX
 {
-
     [TestFixture]
     public class GDAXBrokerageTests
     {
-
         #region Declarations
         GDAXBrokerage _unit;
         Mock<IWebSocket> _wss = new Mock<IWebSocket>();
@@ -53,7 +51,7 @@ namespace QuantConnect.Tests.Brokerages.GDAX
         AccountType _accountType = AccountType.Margin;
         #endregion
 
-        [SetUp()]
+        [SetUp]
         public void Setup()
         {
             _unit = new GDAXBrokerage("wss://localhost", _wss.Object, _rest.Object, "abc", "MTIz", "pass", _algo.Object);
@@ -101,7 +99,7 @@ namespace QuantConnect.Tests.Brokerages.GDAX
             });
         }
 
-        [Test()]
+        [Test]
         public void IsConnectedTest()
         {
             _wss.Setup(w => w.IsOpen).Returns(true);
@@ -110,24 +108,20 @@ namespace QuantConnect.Tests.Brokerages.GDAX
             Assert.IsFalse(_unit.IsConnected);
         }
 
-        [Test()]
+        [Test]
         public void ConnectTest()
         {
+            _wss.Setup(m => m.Connect()).Callback(() => { _wss.Setup(m => m.IsOpen).Returns(true); }).Verifiable();
             _wss.Setup(m => m.IsOpen).Returns(false);
-            _wss.Setup(w => w.Connect()).Callback(() => _wss.Setup(w => w.IsOpen).Returns(true)).Verifiable();
-
             _unit.Connect();
             _wss.Verify();
         }
 
-        [Test()]
+        [Test]
         public void DisconnectTest()
         {
-            _wss.Setup(m => m.IsOpen).Returns(false);
-            _wss.Setup(w => w.Connect()).Callback(() => _wss.Setup(w => w.IsOpen).Returns(true)).Verifiable();
             _wss.Setup(m => m.Close()).Verifiable();
-
-            _unit.Connect();
+            _wss.Setup(m => m.IsOpen).Returns(true);
             _unit.Disconnect();
             _wss.Verify();
         }
@@ -157,13 +151,21 @@ namespace QuantConnect.Tests.Brokerages.GDAX
                 actualFee += e.OrderFee;
                 actualQuantity += e.AbsoluteFillQuantity;
 
-                Assert.AreEqual(actualQuantity != orderQuantity ? Orders.OrderStatus.PartiallyFilled : Orders.OrderStatus.Filled, e.Status);
+                Assert.IsTrue(actualQuantity != orderQuantity);
+                Assert.AreEqual(OrderStatus.Filled, e.Status);
                 Assert.AreEqual(expectedQuantity, e.FillQuantity);
-                Assert.AreEqual(0.00858216m, Math.Round(actualFee, 8));
+                // fill quantity = 5.23512
+                // fill price = 400.23
+                // partial order fee = (400.23 * 5.23512 * 0.003) = 6.2857562328
+                Assert.AreEqual(6.2857562328m, actualFee);
                 raised.Set();
             };
 
-            _unit.OnMessage(_unit, new WebSocketMessage(json));
+            _unit.OnMessage(_unit, GDAXTestsHelpers.GetArgs(json));
+
+            // not our order, market order is completed even if not totally filled
+            json = json.Replace(id, Guid.NewGuid().ToString());
+            _unit.OnMessage(_unit, GDAXTestsHelpers.GetArgs(json));
 
             //if not our order should get no event
             Assert.AreEqual(raised.WaitOne(1000), expectedQuantity != 99);
@@ -228,7 +230,7 @@ namespace QuantConnect.Tests.Brokerages.GDAX
             Assert.IsTrue(actual || (orderId == null && !actual));
         }
 
-        [Test()]
+        [Test]
         public void GetOpenOrdersTest()
         {
             SetupResponse(_openOrderData);
@@ -248,7 +250,7 @@ namespace QuantConnect.Tests.Brokerages.GDAX
 
         }
 
-        [Test()]
+        [Test]
         public void GetTickTest()
         {
             var actual = _unit.GetTick(_symbol);
@@ -257,7 +259,7 @@ namespace QuantConnect.Tests.Brokerages.GDAX
             Assert.AreEqual(5957.11914015, actual.Quantity);
         }
 
-        [Test()]
+        [Test]
         public void GetCashBalanceTest()
         {
             SetupResponse(_accountsData);
@@ -275,9 +277,13 @@ namespace QuantConnect.Tests.Brokerages.GDAX
             Assert.AreEqual(333.985m, btc.ConversionRate);
         }
 
-        [Test()]
+        [Test, Ignore("Holdings are now set to 0 swaps at the start of each launch. Not meaningful.")]
         public void GetAccountHoldingsTest()
         {
+            SetupResponse(_holdingData);
+
+            _unit.CachedOrderIDs.TryAdd(1, new Orders.MarketOrder { BrokerId = new List<string> { "1" }, Price = 123 });
+
             var actual = _unit.GetAccountHoldings();
 
             Assert.AreEqual(0, actual.Count());
@@ -302,14 +308,13 @@ namespace QuantConnect.Tests.Brokerages.GDAX
             Assert.AreEqual(expected, actual);
         }
 
-
         [Test]
         public void UpdateOrderTest()
         {
             Assert.Throws<NotSupportedException>(() => _unit.UpdateOrder(new LimitOrder()));
         }
 
-        [Test, Ignore("Obsolete. Now uses order book")]
+        [Test]
         public void SubscribeTest()
         {
             string actual = null;
@@ -323,10 +328,17 @@ namespace QuantConnect.Tests.Brokerages.GDAX
 
             StringAssert.Contains(expected, actual);
 
-            Assert.AreEqual(3, _unit.Ticks.Count());
-            Assert.AreEqual(333.98, _unit.Ticks.First().BidPrice);
-            Assert.AreEqual(333.99, _unit.Ticks.First().AskPrice);
-            Assert.AreEqual(333.985, _unit.Ticks.First().Price);
+            // spin for a few seconds, waiting for the GBPUSD tick
+            var start = DateTime.UtcNow;
+            var timeout = start.AddSeconds(5);
+            while (_unit.Ticks.Count == 0 && DateTime.UtcNow < timeout)
+            {
+                Thread.Sleep(1);
+            }
+
+            // only rate conversion ticks are received during subscribe
+            Assert.AreEqual(1, _unit.Ticks.Count);
+            Assert.AreEqual("GBPUSD", _unit.Ticks[0].Symbol.Value);
         }
 
         [Test]
@@ -338,17 +350,15 @@ namespace QuantConnect.Tests.Brokerages.GDAX
             _unit.Unsubscribe(new List<Symbol> { Symbol.Create("BTCUSD", SecurityType.Crypto, Market.GDAX) });
             StringAssert.Contains("user", actual);
             StringAssert.Contains("heartbeat", actual);
-            //obsolete. now uses order book
-            //StringAssert.Contains("ticker", actual);
             StringAssert.Contains("matches", actual);
         }
 
-        [Test, Ignore("Obsolete: Now uses order book updates")]
+        [Test, Ignore("This test is obsolete, the 'ticker' channel is no longer used.")]
         public void OnMessageTickerTest()
         {
             string json = _tickerData;
 
-            _unit.OnMessage(_unit, new WebSocketMessage(json));
+            _unit.OnMessage(_unit, GDAXTestsHelpers.GetArgs(json));
 
             var actual = _unit.Ticks.First();
 
@@ -369,8 +379,30 @@ namespace QuantConnect.Tests.Brokerages.GDAX
         {
             _unit.PollTick(Symbol.Create("GBPUSD", SecurityType.Crypto, Market.GDAX));
             Thread.Sleep(1000);
+
+            // conversion rates are inverted: value = 1 / 1.234
             Assert.AreEqual(0.8103727714748784440842787682m, _unit.Ticks.First().Price);
         }
 
+        [Test]
+        public void ErrorTest()
+        {
+            string actual = null;
+
+            // subscribe to invalid symbol
+            const string expected = "[\"BTC-LTC\"]";
+            _wss.Setup(w => w.Send(It.IsAny<string>())).Callback<string>(c => actual = c);
+
+            _unit.Subscribe(new[] { Symbol.Create("BTCLTC", SecurityType.Crypto, Market.GDAX)});
+
+            StringAssert.Contains(expected, actual);
+
+            BrokerageMessageType messageType = 0;
+            _unit.Message += (sender, e) => { messageType = e.Type; };
+            const string json = "{\"type\":\"error\",\"message\":\"Failed to subscribe\",\"reason\":\"Invalid product ID provided\"}";
+            _unit.OnMessage(_unit, GDAXTestsHelpers.GetArgs(json));
+
+            Assert.AreEqual(BrokerageMessageType.Warning, messageType);
+        }
     }
 }

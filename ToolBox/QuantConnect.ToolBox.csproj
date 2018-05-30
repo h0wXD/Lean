@@ -36,7 +36,7 @@
     <LangVersion>6</LangVersion>
   </PropertyGroup>
   <PropertyGroup>
-    <StartupObject>QuantConnect.ToolBox.GDAXDownloader.Program</StartupObject>
+    <StartupObject>QuantConnect.ToolBox.CryptodatasetsConverter.Program</StartupObject>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="DotNetZip, Version=1.10.1.0, Culture=neutral, PublicKeyToken=6583c7c814667745, processorArchitecture=MSIL">
@@ -129,6 +129,9 @@
     <Reference Include="NodaTime, Version=1.3.0.0, Culture=neutral, PublicKeyToken=4226afe0d9b296d1, processorArchitecture=MSIL">
       <HintPath>..\packages\NodaTime.1.3.4\lib\net35-Client\NodaTime.dll</HintPath>
     </Reference>
+    <Reference Include="Python.Runtime, Version=2.4.0.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\QuantConnect.pythonnet.1.0.5.7\lib\Python.Runtime.dll</HintPath>
+    </Reference>
     <Reference Include="QuantConnect.Fxcm">
       <HintPath>..\Brokerages\Fxcm\QuantConnect.Fxcm.dll</HintPath>
     </Reference>
@@ -155,6 +158,11 @@
   <ItemGroup>
     <Compile Include="GDAXDownloader\GDAXDownloader.cs" />
     <Compile Include="GDAXDownloader\Program.cs" />
+    <Compile Include="GzipStreamProvider.cs" />
+    <Compile Include="IBDownloader\IBDataDownloader.cs" />
+    <Compile Include="IBDownloader\Program.cs" />
+    <Compile Include="IVolatilityEquityConverter\Program.cs" />
+    <Compile Include="CryptodatasetsConverter\Program.cs" />
     <Compile Include="TickAggregator.cs" />
     <Compile Include="AlgoSeekFuturesConverter\AlgoSeekFuturesConverter.cs" />
     <Compile Include="AlgoSeekFuturesConverter\AlgoSeekFuturesProcessor.cs" />
@@ -200,6 +208,8 @@
     <Compile Include="IStreamParser.cs" />
     <Compile Include="IStreamProvider.cs" />
     <Compile Include="KaikoDataConverter\Program.cs" />
+    <Compile Include="KrakenDataDownloader\KrakenDataDownloader.cs" />
+    <Compile Include="KrakenDataDownloader\Program.cs" />
     <Compile Include="LazyStreamWriter.cs" />
     <Compile Include="LeanDataReader.cs" />
     <Compile Include="LeanDataWriter.cs" />
@@ -236,6 +246,12 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Include="packages.config" />
+    <Content Include="Visualizer\QuantConnect.Visualizer.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Visualizer\__init__.py">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
   <ItemGroup>
     <None Include="instruments_oanda.txt">
@@ -283,7 +299,14 @@
   </ItemGroup>
   <ItemGroup />
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
-  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
+  <Import Project="..\packages\QuantConnect.pythonnet.1.0.5.7\build\QuantConnect.pythonnet.targets" Condition="Exists('..\packages\QuantConnect.pythonnet.1.0.5.7\build\QuantConnect.pythonnet.targets')" />
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('..\packages\QuantConnect.pythonnet.1.0.5.7\build\QuantConnect.pythonnet.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\packages\QuantConnect.pythonnet.1.0.5.7\build\QuantConnect.pythonnet.targets'))" />
+  </Target>
+  <!-- To modify your build process, add your task inside one of the targets below and uncomment it.
        Other similar extension points exist, see Microsoft.Common.targets.
   <Target Name="BeforeBuild">
   </Target>

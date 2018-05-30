@@ -1,11 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using NodaTime;
 using QuantConnect.Data;
-using QuantConnect.Data.Consolidators;
 using QuantConnect.Data.Market;
+using QuantConnect.Logging;
 using QuantConnect.Util;
 
 namespace QuantConnect.ToolBox.KaikoDataConverter
@@ -56,10 +57,19 @@ namespace QuantConnect.ToolBox.KaikoDataConverter
 
                 foreach (var symbolMonthDirectory in Directory.EnumerateDirectories(symbolDirectoryInfo.FullName))
                 {
-                    foreach (var tradeFile in Directory.EnumerateFiles(symbolMonthDirectory))
+                    foreach (var tradeFile in Directory.EnumerateFiles(symbolMonthDirectory, "*.gz"))
                     {
+                        string unzippedFile;
                         // Unzip file
-                        var unzippedFile = Compression.UnGZip(tradeFile, symbolMonthDirectory);
+                        try
+                        {
+                            unzippedFile = Compression.UnGZip(tradeFile, symbolMonthDirectory);
+                        }
+                        catch (Exception e)
+                        {
+                            Log.Error($"KaikoDataConverter.CreateCryptoTicks(): File {tradeFile} cannot be unzipped. Exception {e}");
+                            continue;
+                        }
 
                         // Write the ticks
                         var writer = new LeanDataWriter(Resolution.Tick, symbol, Globals.DataFolder, tickType);
@@ -86,25 +96,32 @@ namespace QuantConnect.ToolBox.KaikoDataConverter
                 var symbolDirectoryInfo = new DirectoryInfo(tickDirectory);
                 var symbol = Symbol.Create(symbolDirectoryInfo.Name, SecurityType.Crypto, market);
 
-                foreach (var tickDateFile in Directory.EnumerateFiles(symbolDirectoryInfo.FullName))
+                foreach (var tickDateFile in Directory.EnumerateFiles(symbolDirectoryInfo.FullName, "*.zip"))
                 {
-                    // There are both trade and quote files in directory - we only want one type
-                    if (!tickDateFile.Contains(tickType.ToLower())) continue;
-
-                    var consolidators = GetDataAggregatorsForTickType(tickType);
-                    var reader = GetLeanDataTickReader(symbol, tickType, tickDateFile);
-
-                    foreach (var tickBar in reader.Parse().Select(x => x as Tick))
+                    try
                     {
+                        // There are both trade and quote files in directory - we only want one type
+                        if (!tickDateFile.Contains(tickType.ToLower())) continue;
+
+                        var consolidators = GetDataAggregatorsForTickType(tickType);
+                        var reader = GetLeanDataTickReader(symbol, tickType, tickDateFile);
+
+                        foreach (var tickBar in reader.Parse().Select(x => x as Tick))
+                        {
+                            foreach (var consolidator in consolidators)
+                            {
+                                consolidator.Consolidator.Update(tickBar);
+                            }
+                        }
+
                         foreach (var consolidator in consolidators)
                         {
-                            consolidator.Consolidator.Update(tickBar);
+                            WriteTradeTicksForResolution(symbol, consolidator.Resolution, tickType, consolidator.Flush());
                         }
                     }
-
-                    foreach (var consolidator in consolidators)
+                    catch (Exception e)
                     {
-                        WriteTradeTicksForResolution(symbol, consolidator.Resolution, tickType, consolidator.Flush());
+                        Log.Error($"KaikoDataConverter.AggregateTicksInAllResolutions(): Error processing file {tickDateFile}. Exception {e}");
                     }
                 }
             }
@@ -197,12 +214,27 @@ namespace QuantConnect.ToolBox.KaikoDataConverter
                     var lineParts = line.Split(',');
 
                     var tickEpoch = Convert.ToInt64(lineParts[dateColumn]);
+
+                    decimal quantity;
+                    decimal price;
+
+                    try
+                    {
+                        quantity = ParseScientificNotationToDecimal(lineParts, quantityColumn);
+                        price = ParseScientificNotationToDecimal(lineParts, priceColumn);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"KaikoDataConverter.ParseKaikoQuoteFile(): Data corrupted in file {unzippedFile}. Line {string.Join(" ", lineParts)}, Exception {ex}");
+                        continue;
+                    }
+
                     var currentTick = new KaikoTick
                     {
                         TickType = TickType.Quote,
                         Time = Time.UnixMillisecondTimeStampToDateTime(tickEpoch),
-                        Quantity = ParseQuantity(lineParts, quantityColumn),
-                        Value = Convert.ToDecimal(lineParts[priceColumn]),
+                        Quantity = quantity,
+                        Value = price,
                         OrderDirection = lineParts[typeColumn]
                     };
 
@@ -290,13 +322,28 @@ namespace QuantConnect.ToolBox.KaikoDataConverter
                     if (line == null) continue;
 
                     var lineParts = line.Split(',');
+
+                    decimal quantity;
+                    decimal price;
+
+                    try
+                    {
+                        quantity = ParseScientificNotationToDecimal(lineParts, quantityColumn);
+                        price = ParseScientificNotationToDecimal(lineParts, priceColumn);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error($"KaikoDataConverter.ParseKaikoTradeFile(): Data corrupted in file {unzippedFile}. Line {string.Join(" ", lineParts)}, Exception {ex}");
+                        continue;
+                    }
+
                     yield return new Tick
                     {
                         Symbol = symbol,
                         TickType = TickType.Trade,
                         Time = Time.UnixMillisecondTimeStampToDateTime(Convert.ToInt64(lineParts[dateColumn])),
-                        Quantity = ParseQuantity(lineParts, quantityColumn),
-                        Value = Convert.ToDecimal(lineParts[priceColumn])
+                        Quantity = quantity,
+                        Value = price
                     };
                 }
             }
@@ -306,17 +353,18 @@ namespace QuantConnect.ToolBox.KaikoDataConverter
         /// Parse the quantity field of the kaiko ticks - can sometimes be expressed in scientific notation
         /// </summary>
         /// <param name="lineParts">The line from the Kaiko file</param>
-        /// <param name="quantityColumn">The index of the quantity column </param>
+        /// <param name="column">The index of the quantity column </param>
         /// <returns>The quantity as a decimal</returns>
-        private static decimal ParseQuantity(string[] lineParts, int quantityColumn)
+        private static decimal ParseScientificNotationToDecimal(string[] lineParts, int column)
         {
-            var quantity = lineParts[quantityColumn];
-            if (quantity.Contains("e"))
+            var value = lineParts[column];
+            if (value.Contains("e"))
             {
-                return Decimal.Parse(quantity, System.Globalization.NumberStyles.Float);
+                return Decimal.Parse(value, NumberStyles.Float, CultureInfo.InvariantCulture);
             }
 
-            return Convert.ToDecimal(lineParts[quantityColumn]);
+            return Convert.ToDecimal(lineParts[column], CultureInfo.InvariantCulture);
+
         }
 
         /// <summary>

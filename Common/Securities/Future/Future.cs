@@ -27,7 +27,7 @@ namespace QuantConnect.Securities.Future
     /// Futures Security Object Implementation for Futures Assets
     /// </summary>
     /// <seealso cref="Security"/>
-    public class Future : Security
+    public class Future : Security, IDerivativeSecurity
     {
         /// <summary>
         /// The default number of days required to settle a futures sale
@@ -101,9 +101,18 @@ namespace QuantConnect.Securities.Future
             SetFilter(TimeSpan.Zero, TimeSpan.FromDays(35));
         }
 
-
         // save off a strongly typed version of symbol properties
         private readonly SymbolProperties _symbolProperties;
+
+        /// <summary>
+        /// Returns true if this is the future chain security, false if it is a specific future contract
+        /// </summary>
+        public bool IsFutureChain => Symbol.IsCanonical();
+
+        /// <summary>
+        /// Returns true if this is a specific future contract security, false if it is the future chain security
+        /// </summary>
+        public bool IsFutureContract => !Symbol.IsCanonical();
 
         /// <summary>
         /// Gets the expiration date
@@ -118,7 +127,7 @@ namespace QuantConnect.Securities.Future
         /// </summary>
         public SettlementType SettlementType
         {
-            get; set; 
+            get; set;
         }
 
         /// <summary>
@@ -149,7 +158,6 @@ namespace QuantConnect.Securities.Future
         {
             SetFilter(universe => universe.Expiration(minExpiry, maxExpiry));
         }
-
 
         /// <summary>
         /// Sets the <see cref="ContractFilter"/> to a new universe selection function

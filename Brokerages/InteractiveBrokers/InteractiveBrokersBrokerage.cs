@@ -327,6 +327,8 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
 
                     _requestInformation[orderId] = "CancelOrder: " + order;
 
+                    _messagingRateLimiter.WaitToProceed();
+
                     _client.ClientSocket.cancelOrder(orderId);
                 }
 
@@ -364,6 +366,8 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
 
             _client.OpenOrder += clientOnOpenOrder;
             _client.OpenOrderEnd += clientOnOpenOrderEnd;
+
+            _messagingRateLimiter.WaitToProceed();
 
             _client.ClientSocket.reqAllOpenOrders();
 
@@ -477,6 +481,8 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
 
             _client.ExecutionDetails += clientOnExecDetails;
             _client.ExecutionDetailsEnd += clientOnExecutionDataEnd;
+
+            _messagingRateLimiter.WaitToProceed();
 
             // no need to be fancy with request id since that's all this client does is 1 request
             _client.ClientSocket.reqExecutions(requestId, filter);
@@ -800,6 +806,8 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
 
             _requestInformation[ibOrderId] = "IBPlaceOrder: " + contract;
 
+            _messagingRateLimiter.WaitToProceed();
+
             if (order.Type == OrderType.OptionExercise)
             {
                 _client.ClientSocket.exerciseOptions(ibOrderId, contract, 1, decimal.ToInt32(order.Quantity), _account, 0);
@@ -895,6 +903,8 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
 
             _client.ContractDetails += clientOnContractDetails;
 
+            _messagingRateLimiter.WaitToProceed();
+
             // make the request for data
             _client.ClientSocket.reqContractDetails(requestId, contract);
 
@@ -943,6 +953,8 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
 
             _client.ContractDetails += clientOnContractDetails;
             _client.ContractDetailsEnd += clientOnContractDetailsEnd;
+
+            _messagingRateLimiter.WaitToProceed();
 
             // make the request for data
             _client.ClientSocket.reqContractDetails(requestId, contract);
@@ -1024,6 +1036,8 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
             Log.Trace("InteractiveBrokersBrokerage.GetUsdConversion(): Requesting market data for " + currencyPair);
             _client.TickPrice += clientOnTickPrice;
 
+            _messagingRateLimiter.WaitToProceed();
+
             _client.ClientSocket.reqMktData(marketDataTicker, contract, string.Empty, true, false, new List<TagValue>());
 
             if (!manualResetEvent.WaitOne(requestTimeout * 1000))
@@ -1085,6 +1099,8 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
                     _client.HistoricalData += clientOnHistoricalData;
                     _client.HistoricalDataEnd += clientOnHistoricalDataEnd;
                     _client.Error += clientOnError;
+
+                    _messagingRateLimiter.WaitToProceed();
 
                     // request some historical data, IB's api takes into account weekends/market opening hours
                     const string requestSpan = "100 S";
@@ -1605,15 +1621,10 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
                 TotalQuantity = (int)Math.Abs(order.Quantity),
                 OrderType = ConvertOrderType(order.Type),
                 AllOrNone = false,
-                Tif = IB.TimeInForce.GoodTillCancel,
+                Tif = ConvertTimeInForce(order),
                 Transmit = true,
                 Rule80A = _agentDescription
             };
-
-            if (order.Type == OrderType.MarketOnOpen)
-            {
-                ibOrder.Tif = IB.TimeInForce.MarketOnOpen;
-            }
 
             var limitOrder = order as LimitOrder;
             var stopMarketOrder = order as StopMarketOrder;
@@ -1739,6 +1750,8 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
 
             order.BrokerId.Add(ibOrder.OrderId.ToString());
 
+            order.Properties.TimeInForce = ConvertTimeInForce(ibOrder.Tif);
+
             return order;
         }
 
@@ -1778,7 +1791,7 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
                 contract.Right = symbol.ID.OptionRight == OptionRight.Call ? IB.RightType.Call : IB.RightType.Put;
                 contract.Strike = Convert.ToDouble(symbol.ID.StrikePrice);
                 contract.Symbol = ibSymbol;
-                contract.Multiplier = "100";
+                contract.Multiplier = _securityProvider.GetSecurity(symbol)?.SymbolProperties.ContractMultiplier.ToString(CultureInfo.InvariantCulture) ?? "100";
                 contract.TradingClass = GetTradingClass(contract);
             }
 
@@ -1875,6 +1888,66 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
 
                 default:
                     throw new ArgumentException(order.OrderType, "order.OrderType");
+            }
+        }
+
+        /// <summary>
+        /// Maps TimeInForce from IB to LEAN
+        /// </summary>
+        private static TimeInForce ConvertTimeInForce(string timeInForce)
+        {
+            switch (timeInForce)
+            {
+                case IB.TimeInForce.Day:
+                    return TimeInForce.Day;
+
+                //case IB.TimeInForce.GoodTillDate:
+                //    return TimeInForce.GoodTilDate;
+
+                //case IB.TimeInForce.FillOrKill:
+                //    return TimeInForce.FillOrKill;
+
+                //case IB.TimeInForce.ImmediateOrCancel:
+                //    return TimeInForce.ImmediateOrCancel;
+
+                case IB.TimeInForce.MarketOnOpen:
+                case IB.TimeInForce.GoodTillCancel:
+                default:
+                    return TimeInForce.GoodTilCanceled;
+            }
+        }
+
+        /// <summary>
+        /// Maps TimeInForce from LEAN to IB
+        /// </summary>
+        private static string ConvertTimeInForce(Order order)
+        {
+            if (order.Type == OrderType.MarketOnOpen)
+            {
+                return IB.TimeInForce.MarketOnOpen;
+            }
+            if (order.Type == OrderType.MarketOnClose)
+            {
+                return IB.TimeInForce.Day;
+            }
+
+            switch (order.TimeInForce)
+            {
+                case TimeInForce.Day:
+                    return IB.TimeInForce.Day;
+
+                //case TimeInForce.GoodTilDate:
+                //    return IB.TimeInForce.GoodTillDate;
+
+                //case TimeInForce.FillOrKill:
+                //    return IB.TimeInForce.FillOrKill;
+
+                //case TimeInForce.ImmediateOrCancel:
+                //    return IB.TimeInForce.ImmediateOrCancel;
+
+                case TimeInForce.GoodTilCanceled:
+                default:
+                    return IB.TimeInForce.GoodTillCancel;
             }
         }
 
@@ -2641,7 +2714,7 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
 
             var history = new List<TradeBar>();
             var dataDownloading = new AutoResetEvent(false);
-            var dataDownloaded = new ManualResetEvent(false);
+            var dataDownloaded = new AutoResetEvent(false);
 
             var useRegularTradingHours = Convert.ToInt32(!request.IncludeExtendedMarketHours);
 
@@ -2694,6 +2767,8 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
                 Client.HistoricalData += clientOnHistoricalData;
                 Client.HistoricalDataEnd += clientOnHistoricalDataEnd;
 
+                _messagingRateLimiter.WaitToProceed();
+
                 Client.ClientSocket.reqHistoricalData(historicalTicker, contract, endTime.ToString("yyyyMMdd HH:mm:ss UTC"),
                     duration, resolution, dataType, useRegularTradingHours, 2, false, new List<TagValue>());
 
@@ -2728,7 +2803,7 @@ namespace QuantConnect.Brokerages.InteractiveBrokers
 
                 var filteredPiece = historyPiece.OrderBy(x => x.Time);
 
-                history.AddRange(filteredPiece);
+                history.InsertRange(0, filteredPiece);
 
                 // moving endTime to the new position to proceed with next request (if needed)
                 endTime = filteredPiece.First().Time;

@@ -13,8 +13,6 @@
  * limitations under the License.
 */
 
-using System.Collections.Generic;
-
 namespace QuantConnect.Orders.Fees
 {
     /// <summary>
@@ -23,36 +21,33 @@ namespace QuantConnect.Orders.Fees
     public class GDAXFeeModel : IFeeModel
     {
         /// <summary>
-        /// Tier 1 maker fees
-        /// https://www.gdax.com/fees/BTC-USD
+        /// Tier 1 taker fees
+        /// https://www.gdax.com/fees
         /// </summary>
-        private static readonly Dictionary<string, decimal> Fees = new Dictionary<string, decimal>
-        {
-            { "BTCUSD", 0.0025m }, { "BTCEUR", 0.0025m }, { "BTCGBP", 0.0025m },
-            { "ETHBTC", 0.003m }, { "ETHEUR", 0.003m }, { "ETHUSD", 0.003m },
-            { "LTCBTC", 0.003m }, { "LTCEUR", 0.003m }, { "LTCUSD", 0.003m },
-        };
+        public const decimal TakerFee = 0.003m;
 
         /// <summary>
-        /// Get the fee for this order
+        /// Get the fee for this order in units of the account currency
         /// </summary>
         /// <param name="security">The security matching the order</param>
         /// <param name="order">The order to compute fees for</param>
         /// <returns>The cost of the order in units of the account currency</returns>
         public decimal GetOrderFee(Securities.Security security, Order order)
         {
-            //0% maker fee after reimbursement.
-            if (order.Type == OrderType.Limit)
+            // marketable limit orders are considered takers
+            if (order.Type == OrderType.Limit && !order.IsMarketable)
             {
+                // limit order posted to the order book, 0% maker fee
                 return 0m;
             }
 
-            // currently we do not model daily rebates
+            // get order value in account currency, then apply taker fee factor
+            var unitPrice = order.Direction == OrderDirection.Buy ? security.AskPrice : security.BidPrice;
+            unitPrice *= security.QuoteCurrency.ConversionRate * security.SymbolProperties.ContractMultiplier;
 
-            decimal fee;
-            Fees.TryGetValue(security.Symbol.Value, out fee);
+            // currently we do not model 30-day volume, so we use the first tier
 
-            return security.Price * order.AbsoluteQuantity * fee;
+            return unitPrice * order.AbsoluteQuantity * TakerFee;
         }
     }
 }
