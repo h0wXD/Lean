@@ -272,6 +272,11 @@ namespace QuantConnect.Statistics
 
             var listBenchmark = new List<double>();
 
+            if (benchmark.Count == 0)
+            {
+                return listBenchmark;
+            }
+
             var minDate = equity.Keys.FirstOrDefault().AddDays(-1);
             var maxDate = equity.Keys.LastOrDefault();
 
