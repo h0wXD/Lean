@@ -14,11 +14,11 @@
 */
 
 using System;
-using System.Collections.Generic;
 using QuantConnect.Algorithm.Framework;
 using QuantConnect.Algorithm.Framework.Alphas;
 using QuantConnect.Algorithm.Framework.Execution;
 using QuantConnect.Algorithm.Framework.Portfolio;
+using QuantConnect.Algorithm.Framework.Risk;
 using QuantConnect.Algorithm.Framework.Selection;
 using QuantConnect.Orders;
 
@@ -50,11 +50,11 @@ namespace QuantConnect.Algorithm.CSharp
             // Options Resolution: Minute Only.
 
             // set algorithm framework models
-            UniverseSelection = new ManualUniverseSelectionModel(QuantConnect.Symbol.Create("SPY", SecurityType.Equity, Market.USA));
-            Alpha = new ConstantAlphaModel(InsightType.Price, InsightDirection.Up, TimeSpan.FromMinutes(20), 0.025, null);
-            PortfolioConstruction = new EqualWeightingPortfolioConstructionModel();
-            Execution = new ImmediateExecutionModel();
-            RiskManagement = new Algorithm.Framework.Risk.NullRiskManagementModel();
+            SetUniverseSelection(new ManualUniverseSelectionModel(QuantConnect.Symbol.Create("SPY", SecurityType.Equity, Market.USA)));
+            SetAlpha(new ConstantAlphaModel(InsightType.Price, InsightDirection.Up, TimeSpan.FromMinutes(20), 0.025, null));
+            SetPortfolioConstruction(new EqualWeightingPortfolioConstructionModel());
+            SetExecution(new ImmediateExecutionModel());
+            SetRiskManagement(new MaximumDrawdownPercentPerSecurity(0.01m));
         }
 
         public override void OnOrderEvent(OrderEvent orderEvent)

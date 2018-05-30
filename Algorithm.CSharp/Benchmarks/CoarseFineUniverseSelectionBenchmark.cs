@@ -13,61 +13,64 @@
  * limitations under the License.
 */
 
-using System;
 using System.Collections.Generic;
 using System.Linq;
+using QuantConnect.Data.Fundamental;
 using QuantConnect.Data.Market;
 using QuantConnect.Data.UniverseSelection;
-using QuantConnect.Orders;
 
-namespace QuantConnect.Algorithm.CSharp
+namespace QuantConnect.Algorithm.CSharp.Benchmarks
 {
-    /// <summary>
-    /// In this algorithm we demonstrate how to use the coarse fundamental data to
-    /// define a universe as the top dollar volume
-    /// </summary>
-    /// <meta name="tag" content="using data" />
-    /// <meta name="tag" content="universes" />
-    /// <meta name="tag" content="coarse universes" />
-    /// <meta name="tag" content="regression test" />
-    public class CoarseFundamentalTop5Algorithm : QCAlgorithm
-    {
-        private const int NumberOfSymbols = 5;
 
-        // initialize our changes to nothing
+    public class CoarseFineUniverseSelectionBenchmark : QCAlgorithm
+    {
+        private const int NumberOfSymbolsCoarse = 30;
+        private const int NumberOfSymbolsFine = 2;
+
         private SecurityChanges _changes = SecurityChanges.None;
 
         public override void Initialize()
         {
             UniverseSettings.Resolution = Resolution.Daily;
 
-            SetStartDate(2014, 01, 01);
-            SetEndDate(2015, 01, 01);
+            SetStartDate(2017, 01, 01);
+            SetEndDate(2018, 01, 01);
             SetCash(50000);
 
-            // this add universe method accepts a single parameter that is a function that
-            // accepts an IEnumerable<CoarseFundamental> and returns IEnumerable<Symbol>
-            AddUniverse(CoarseSelectionFunction);
+            AddUniverse(CoarseSelectionFunction, FineSelectionFunction);
         }
 
-        // sort the data by daily dollar volume and take the top 'NumberOfSymbols'
-        public static IEnumerable<Symbol> CoarseSelectionFunction(IEnumerable<CoarseFundamental> coarse)
+        // sort the data by daily dollar volume and take the top 'NumberOfSymbolsCoarse'
+        public IEnumerable<Symbol> CoarseSelectionFunction(IEnumerable<CoarseFundamental> coarse)
         {
-            // sort descending by daily dollar volume
-            var sortedByDollarVolume = coarse.OrderByDescending(x => x.DollarVolume);
+            // select only symbols with fundamental data and sort descending by daily dollar volume
+            var sortedByDollarVolume = coarse
+                .Where(x => x.HasFundamentalData)
+                .OrderByDescending(x => x.DollarVolume);
 
             // take the top entries from our sorted collection
-            var top5 = sortedByDollarVolume.Take(NumberOfSymbols);
+            var top5 = sortedByDollarVolume.Take(NumberOfSymbolsCoarse);
 
             // we need to return only the symbol objects
             return top5.Select(x => x.Symbol);
         }
 
+        // sort the data by P/E ratio and take the top 'NumberOfSymbolsFine'
+        public IEnumerable<Symbol> FineSelectionFunction(IEnumerable<FineFundamental> fine)
+        {
+            // sort descending by P/E ratio
+            var sortedByPeRatio = fine.OrderByDescending(x => x.ValuationRatios.PERatio);
+
+            // take the top entries from our sorted collection
+            var topFine = sortedByPeRatio.Take(NumberOfSymbolsFine);
+
+            // we need to return only the symbol objects
+            return topFine.Select(x => x.Symbol);
+        }
+
         //Data Event Handler: New data arrives here. "TradeBars" type is a dictionary of strings so you can access it by symbol.
         public void OnData(TradeBars data)
         {
-            Console.WriteLine($"OnData({UtcTime:o}): Keys: {string.Join(", ", data.Keys.OrderBy(x => x))}");
-
             // if we have no changes, do nothing
             if (_changes == SecurityChanges.None) return;
 
@@ -80,10 +83,10 @@ namespace QuantConnect.Algorithm.CSharp
                 }
             }
 
-            // we want 20% allocation in each security in our universe
+            // we want 50% allocation in each security in our universe
             foreach (var security in _changes.AddedSecurities)
             {
-                SetHoldings(security.Symbol, 0.2m);
+                SetHoldings(security.Symbol, 0.5m);
             }
 
             _changes = SecurityChanges.None;
@@ -93,11 +96,6 @@ namespace QuantConnect.Algorithm.CSharp
         public override void OnSecuritiesChanged(SecurityChanges changes)
         {
             _changes = changes;
-        }
-
-        public override void OnOrderEvent(OrderEvent fill)
-        {
-            Console.WriteLine($"OnOrderEvent({UtcTime:o}):: {fill}");
         }
     }
 }

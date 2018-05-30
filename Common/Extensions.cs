@@ -14,6 +14,7 @@
 */
 
 using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
@@ -1044,13 +1045,23 @@ namespace QuantConnect
             {
                 return true;
             }
-
+            
             using (Py.GIL())
             {
                 try
                 {
                     result = pyObject.AsManagedObject(typeof(T)) as T;
-                    return true;
+
+                    if (typeof(T) == typeof(Type) || result is IEnumerable)
+                    {
+                        return true;
+                    }
+
+                    // If the PyObject type and the managed object names are the same,
+                    // pyObject is a C# object wrapped in PyObject, in this case return true
+                    // Otherwise, pyObject is a python object that subclass a C# class.
+                    string name = (pyObject.GetPythonType() as dynamic).__name__;
+                    return name == result.GetType().Name;
                 }
                 catch
                 {
@@ -1089,22 +1100,26 @@ namespace QuantConnect
             var locals = new PyDict();
             var types = type.GetGenericArguments();
 
-            for (var i = 0; i < types.Length; i++)
-            {
-                code += $",t{i}";
-                locals.SetItem($"t{i}", types[i].ToPython());
-            }
-            locals.SetItem("pyObject", pyObject);
-
             try
             {
-                var name = type.FullName.Substring(0, type.FullName.IndexOf('`'));
-                code = $"import System; delegate = {name}[{code.Substring(1)}](pyObject)";
+                using (Py.GIL())
+                {
+                    for (var i = 0; i < types.Length; i++)
+                    {
+                        code += $",t{i}";
+                        locals.SetItem($"t{i}", types[i].ToPython());
+                    }
 
-                PythonEngine.Exec(code, null, locals.Handle);
-                result = (T)locals.GetItem("delegate").AsManagedObject(typeof(T));
+                    locals.SetItem("pyObject", pyObject);
 
-                return true;
+                    var name = type.FullName.Substring(0, type.FullName.IndexOf('`'));
+                    code = $"import System; delegate = {name}[{code.Substring(1)}](pyObject)";
+
+                    PythonEngine.Exec(code, null, locals.Handle);
+                    result = (T)locals.GetItem("delegate").AsManagedObject(typeof(T));
+
+                    return true;
+                }
             }
             catch
             {
@@ -1112,6 +1127,25 @@ namespace QuantConnect
                 // Return false as an exception means that the conversion could not be made.
             }
             return false;
+        }
+
+        /// <summary>
+        /// Convert a <see cref="PyObject"/> into a managed object
+        /// </summary>
+        /// <typeparam name="T">Target type of the resulting managed object</typeparam>
+        /// <param name="pyObject">PyObject to be converted</param>
+        /// <returns>Instance of type T</returns>
+        public static T ConvertToDelegate<T>(this PyObject pyObject)
+        {
+            T result;
+            if (pyObject.TryConvertToDelegate(out result))
+            {
+                return result;
+            }
+            else
+            {
+                throw new ArgumentException($"ConvertToDelegate cannot be used to convert a PyObject into {typeof(T)}.");
+            }
         }
 
         /// <summary>
@@ -1132,6 +1166,33 @@ namespace QuantConnect
                 using (Py.GIL())
                 {
                     throw new ArgumentException($"GetEnumString(): {pyObject.Repr()} is not a C# Type.");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Destroys a PyObject
+        /// https://docs.python.org/2/reference/datamodel.html#object.__del__
+        /// </summary>
+        /// <param name="pyObject">PyObject to be destroyed</param>
+        public static void Destroy(this PyObject pyObject)
+        {
+            try
+            {
+                if (pyObject.HasAttr("__del__"))
+                {
+                    pyObject.InvokeMethod("__del__");
+                }
+            }
+            catch (PythonException e)
+            {
+                if (string.IsNullOrWhiteSpace(e.StackTrace))
+                {
+                    throw new Exception($"{(pyObject as dynamic).__qualname__} returned a result with an undefined error set.");
+                }
+                else
+                {
+                    throw e;
                 }
             }
         }

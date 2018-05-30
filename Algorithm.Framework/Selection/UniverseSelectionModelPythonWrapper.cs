@@ -17,13 +17,14 @@ using Python.Runtime;
 using QuantConnect.Data.UniverseSelection;
 using System;
 using System.Collections.Generic;
+using QuantConnect.Interfaces;
 
 namespace QuantConnect.Algorithm.Framework.Selection
 {
     /// <summary>
     /// Provides an implementation of <see cref="IUniverseSelectionModel"/> that wraps a <see cref="PyObject"/> object
     /// </summary>
-    public class UniverseSelectionModelPythonWrapper : IUniverseSelectionModel
+    public class UniverseSelectionModelPythonWrapper : UniverseSelectionModel
     {
         private readonly dynamic _model;
 
@@ -51,15 +52,16 @@ namespace QuantConnect.Algorithm.Framework.Selection
         /// </summary>
         /// <param name="algorithm">The algorithm instance to create universes for</param>
         /// <returns>The universes to be used by the algorithm</returns>
-        public IEnumerable<Universe> CreateUniverses(QCAlgorithmFramework algorithm)
+        public virtual IEnumerable<Universe> CreateUniverses(QCAlgorithmFramework algorithm)
         {
             using (Py.GIL())
             {
-                var universers = _model.CreateUniverses(algorithm) as PyObject;
-                foreach (PyObject universe in universers)
+                var universes = _model.CreateUniverses(algorithm) as PyObject;
+                foreach (PyObject universe in universes)
                 {
                     yield return universe.AsManagedObject(typeof(Universe)) as Universe;
                 }
+                universes.Destroy();
             }
         }
     }

@@ -16,7 +16,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using QuantConnect.Data.Market;
 using QuantConnect.Interfaces;
 using QuantConnect.Securities;
 
@@ -67,6 +66,26 @@ namespace QuantConnect.Orders
         public DateTime Time { get; internal set; }
 
         /// <summary>
+        /// Gets the utc time this order was created. Alias for <see cref="Time"/>
+        /// </summary>
+        public DateTime CreatedTime => Time;
+
+        /// <summary>
+        /// Gets the utc time the last fill was received, or null if no fills have been received
+        /// </summary>
+        public DateTime? LastFillTime { get; internal set; }
+
+        /// <summary>
+        /// Gets the utc time this order was last updated, or null if the order has not been updated.
+        /// </summary>
+        public DateTime? LastUpdateTime { get; internal set; }
+
+        /// <summary>
+        /// Gets the utc time this order was canceled, or null if the order was not canceled.
+        /// </summary>
+        public DateTime? CanceledTime { get; internal set; }
+
+        /// <summary>
         /// Number of shares to execute.
         /// </summary>
         public decimal Quantity
@@ -86,9 +105,9 @@ namespace QuantConnect.Orders
         public OrderStatus Status { get; internal set; }
 
         /// <summary>
-        /// Order duration - GTC or Day. Day not supported in backtests.
+        /// Order Time In Force - GTC or Day. Day not supported in backtests.
         /// </summary>
-        public OrderDuration Duration { get; internal set; }
+        public TimeInForce TimeInForce => Properties.TimeInForce;
 
         /// <summary>
         /// Tag the order with some custom data
@@ -172,11 +191,10 @@ namespace QuantConnect.Orders
             Symbol = Symbol.Empty;
             Status = OrderStatus.None;
             Tag = "";
-            Duration = OrderDuration.GTC;
             BrokerId = new List<string>();
             ContingentId = 0;
             DurationValue = DateTime.MaxValue;
-            Properties = null;
+            Properties = new OrderProperties();
         }
 
         /// <summary>
@@ -196,11 +214,10 @@ namespace QuantConnect.Orders
             Symbol = symbol;
             Status = OrderStatus.None;
             Tag = tag;
-            Duration = OrderDuration.GTC;
             BrokerId = new List<string>();
             ContingentId = 0;
             DurationValue = DateTime.MaxValue;
-            Properties = properties;
+            Properties = properties ?? new OrderProperties();
         }
 
         /// <summary>
@@ -269,16 +286,18 @@ namespace QuantConnect.Orders
         {
             order.Id = Id;
             order.Time = Time;
+            order.LastFillTime = LastFillTime;
+            order.LastUpdateTime = LastUpdateTime;
+            order.CanceledTime = CanceledTime;
             order.BrokerId = BrokerId.ToList();
             order.ContingentId = ContingentId;
-            order.Duration = Duration;
             order.Price = Price;
             order.PriceCurrency = PriceCurrency;
             order.Quantity = Quantity;
             order.Status = Status;
             order.Symbol = Symbol;
             order.Tag = Tag;
-            order.Properties = Properties?.Clone();
+            order.Properties = Properties.Clone();
             order.OrderSubmissionData = OrderSubmissionData?.Clone();
         }
 

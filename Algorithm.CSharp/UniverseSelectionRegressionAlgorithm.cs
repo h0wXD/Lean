@@ -73,6 +73,21 @@ namespace QuantConnect.Algorithm.CSharp
         /// <param name="data">Slice object keyed by symbol containing the stock data</param>
         public override void OnData(Slice data)
         {
+            // can access the current set of active securitie through UniverseManager.ActiveSecurities
+            Log(Time + ": Active Securities: " + string.Join(", ", UniverseManager.ActiveSecurities.Keys));
+
+            // verify we don't receive data for inactive securities
+            var inactiveSymbols = data.Keys
+                .Where(sym => !UniverseManager.ActiveSecurities.ContainsKey(sym))
+                // on daily data we'll get the last data point and the delisting at the same time
+                .Where(sym => !data.Delistings.ContainsKey(sym) || data.Delistings[sym].Type != DelistingType.Delisted)
+                .ToList();
+            if (inactiveSymbols.Any())
+            {
+                var symbols = string.Join(", ", inactiveSymbols);
+                throw new Exception($"Received data for non-active security: {symbols}.");
+            }
+
             if (Transactions.OrdersCount == 0)
             {
                 MarketOrder("SPY", 100);

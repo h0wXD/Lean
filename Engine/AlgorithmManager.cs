@@ -311,10 +311,20 @@ namespace QuantConnect.Lean.Engine
                 {
                     foreach (var security in timeSlice.SecurityChanges.AddedSecurities)
                     {
+                        security.IsTradable = true;
                         if (!algorithm.Securities.ContainsKey(security.Symbol))
                         {
                             // add the new security
                             algorithm.Securities.Add(security);
+                        }
+                    }
+
+                    var activeSecurities = algorithm.UniverseManager.ActiveSecurities;
+                    foreach (var security in timeSlice.SecurityChanges.RemovedSecurities)
+                    {
+                        if (!activeSecurities.ContainsKey(security.Symbol))
+                        {
+                            security.IsTradable = false;
                         }
                     }
                 }
@@ -330,6 +340,22 @@ namespace QuantConnect.Lean.Engine
 
                     // Send market price updates to the TradeBuilder
                     algorithm.TradeBuilder.SetMarketPrice(security.Symbol, security.Price);
+                }
+
+                //Update the securities properties with any universe data
+                if (timeSlice.UniverseData.Count > 0)
+                {
+                    foreach (var kvp in timeSlice.UniverseData)
+                    {
+                        foreach (var data in kvp.Value.Data)
+                        {
+                            Security security;
+                            if (algorithm.Securities.TryGetValue(data.Symbol, out security))
+                            {
+                                security.Cache.StoreData(data);
+                            }
+                        }
+                    }
                 }
 
                 // poke each cash object to update from the recent security data
@@ -820,7 +846,7 @@ namespace QuantConnect.Lean.Engine
                             paired.Add(new DataFeedPacket(security, config, list));
                         }
 
-                        timeSlice = TimeSlice.Create(slice.Time.ConvertToUtc(timeZone), timeZone, algorithm.Portfolio.CashBook, paired, SecurityChanges.None);
+                        timeSlice = TimeSlice.Create(slice.Time.ConvertToUtc(timeZone), timeZone, algorithm.Portfolio.CashBook, paired, SecurityChanges.None, new Dictionary<Universe, BaseDataCollection>());
                     }
                     catch (Exception err)
                     {
@@ -982,6 +1008,21 @@ namespace QuantConnect.Lean.Engine
                 }
                 else
                 {
+                    // mark security as no longer tradable
+                    var security = algorithm.Securities[delisting.Symbol];
+                    security.IsTradable = false;
+                    security.IsDelisted = true;
+
+                    // remove security from all universes
+                    foreach (var ukvp in algorithm.UniverseManager)
+                    {
+                        var universe = ukvp.Value;
+                        if (universe.ContainsMember(security.Symbol))
+                        {
+                            universe.RemoveMember(algorithm.UtcTime, security);
+                        }
+                    }
+
                     Log.Trace("AlgorithmManager.Run(): Security delisted: " + delisting.Symbol.Value);
                     var cancelledOrders = algorithm.Transactions.CancelOpenOrders(delisting.Symbol);
                     foreach (var cancelledOrder in cancelledOrders)

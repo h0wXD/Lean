@@ -36,7 +36,7 @@ namespace QuantConnect.Brokerages.GDAX
     public partial class GDAXBrokerage
     {
         #region Declarations
-        private readonly object _tickLocker = new object();
+
         /// <summary>
         /// Collection of partial split messages
         /// </summary>
@@ -70,6 +70,11 @@ namespace QuantConnect.Brokerages.GDAX
         /// The list of websocket channels to subscribe
         /// </summary>
         protected virtual string[] ChannelNames { get; } = { "heartbeat", "user", "matches" };
+
+        /// <summary>
+        /// Locking object for the Ticks list in the data queue handler
+        /// </summary>
+        protected readonly object TickLocker = new object();
 
         /// <summary>
         /// Constructor for brokerage
@@ -451,7 +456,7 @@ namespace QuantConnect.Brokerages.GDAX
         /// <param name="askSize">The ask price</param>
         private void EmitQuoteTick(Symbol symbol, decimal bidPrice, decimal bidSize, decimal askPrice, decimal askSize)
         {
-            lock (_tickLocker)
+            lock (TickLocker)
             {
                 Ticks.Add(new Tick
                 {
@@ -474,7 +479,7 @@ namespace QuantConnect.Brokerages.GDAX
         {
             var symbol = ConvertProductId(message.ProductId);
 
-            lock (_tickLocker)
+            lock (TickLocker)
             {
                 Ticks.Add(new Tick
                 {
@@ -559,7 +564,7 @@ namespace QuantConnect.Brokerages.GDAX
                 {
                     var rate = GetConversionRate(symbol.Value.Replace("USD", ""));
 
-                    lock (_tickLocker)
+                    lock (TickLocker)
                     {
                         var latest = new Tick
                         {
@@ -623,10 +628,7 @@ namespace QuantConnect.Brokerages.GDAX
                 return 0;
             }
 
-            decimal fee;
-            GDAXFeeModel.Fees.TryGetValue(symbol.Value, out fee);
-
-            return fillPrice * Math.Abs(fillQuantity) * fee;
+            return fillPrice * Math.Abs(fillQuantity) * GDAXFeeModel.TakerFee;
         }
     }
 }

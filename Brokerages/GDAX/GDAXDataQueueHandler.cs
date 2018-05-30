@@ -46,7 +46,7 @@ namespace QuantConnect.Brokerages.GDAX
         /// <returns></returns>
         public IEnumerable<BaseData> GetNextTicks()
         {
-            lock (Ticks)
+            lock (TickLocker)
             {
                 //workaround for mono bug on ToArray.
                 var copy = new List<Data.Market.Tick>();
